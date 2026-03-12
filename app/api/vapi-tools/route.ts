@@ -1,3 +1,5 @@
+// app/api/vapi-tools/route.ts
+
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
   console.log("Incoming:", JSON.stringify(body)?.slice(0, 2000));
@@ -16,7 +18,10 @@ export async function POST(req: Request) {
       const args =
         typeof argsRaw === "string" ? JSON.parse(argsRaw) : (argsRaw ?? {});
 
-      if (name !== "calendar_conflict_check") {
+      if (
+        name !== "calendar_conflict_check" &&
+        name !== "calendar_guarded_create_event"
+      ) {
         results.push({
           toolCallId,
           result: { error: true, message: `Unknown tool: ${name}` },
@@ -24,7 +29,11 @@ export async function POST(req: Request) {
         continue;
       }
 
-      const result = await calendarConflictCheck(args);
+      const result =
+        name === "calendar_conflict_check"
+          ? await calendarConflictCheck(args)
+          : await calendarGuardedCreateEvent(args);
+
       results.push({ toolCallId, result });
     }
 
@@ -49,8 +58,12 @@ async function calendarConflictCheck(args: any) {
   const timeMin = new Date(startDateTime).toISOString();
   const timeMax = new Date(endDateTime).toISOString();
 
+  const calendarId = process.env.GCAL_CALENDAR_ID || "primary";
+
   const url =
-    `https://www.googleapis.com/calendar/v3/calendars/primary/events` +
+    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(
+      calendarId
+    )}/events` +
     `?timeMin=${encodeURIComponent(timeMin)}` +
     `&timeMax=${encodeURIComponent(timeMax)}` +
     `&singleEvents=true&orderBy=startTime`;
@@ -79,6 +92,79 @@ async function calendarConflictCheck(args: any) {
       start: e.start?.dateTime || e.start?.date,
       end: e.end?.dateTime || e.end?.date,
     })),
+  };
+}
+
+async function calendarGuardedCreateEvent(args: any) {
+  const {
+    title,
+    startDateTime,
+    endDateTime,
+    notes,
+    address,
+    customerName,
+    customerPhone,
+    customerEmail,
+  } = args ?? {};
+
+  if (!title || !startDateTime || !endDateTime) {
+    return { error: true, message: "Missing title, startDateTime or endDateTime" };
+  }
+
+  // 1) Check conflicts (same calendar)
+  const conflictResult = await calendarConflictCheck({ startDateTime, endDateTime });
+  if (conflictResult?.error) return conflictResult;
+
+  if (conflictResult?.conflict) {
+    return {
+      error: true,
+      conflict: true,
+      message: "Time slot already booked",
+      ...conflictResult,
+    };
+  }
+
+  // 2) Create event
+  const accessToken = await getGoogleAccessToken();
+  const calendarId = process.env.GCAL_CALENDAR_ID || "primary";
+
+  const eventBody: any = {
+    summary: title,
+    description: [notes, address, customerName, customerPhone, customerEmail]
+      .filter(Boolean)
+      .join("\n"),
+    start: { dateTime: new Date(startDateTime).toISOString() },
+    end: { dateTime: new Date(endDateTime).toISOString() },
+  };
+
+  const res = await fetch(
+    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(
+      calendarId
+    )}/events`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(eventBody),
+    }
+  );
+
+  const text = await res.text();
+  if (!res.ok) {
+    return { error: true, status: res.status, body: text };
+  }
+
+  const created = JSON.parse(text);
+
+  return {
+    created: true,
+    eventId: created.id,
+    htmlLink: created.htmlLink,
+    start: created.start?.dateTime || created.start?.date,
+    end: created.end?.dateTime || created.end?.date,
   };
 }
 
