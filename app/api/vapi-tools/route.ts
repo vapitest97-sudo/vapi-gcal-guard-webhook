@@ -207,21 +207,5 @@ async function getGoogleAccessToken() {
   const data = await res.json();
   if (!res.ok) throw new Error(`Token refresh failed: ${JSON.stringify(data)}`);
 
-  const accessToken = data.access_token as string;
-
-  // DEBUG: log token scopes to confirm we have write permissions
-  const scopes = await getTokenScopes(accessToken);
-  console.log("GCAL token scopes:", scopes);
-
-  return accessToken;
-}
-
-async function getTokenScopes(accessToken: string) {
-  const res = await fetch(
-    `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(
-      accessToken
-    )}`
-  );
-  const data = await res.json().catch(() => ({}));
-  return data.scope || null;
+  return data.access_token as string;
 }
