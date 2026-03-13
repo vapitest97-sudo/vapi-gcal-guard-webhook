@@ -123,7 +123,10 @@ async function calendarGuardedCreateEvent(args: any) {
   }
 
   // 1) Check conflicts (same calendar)
-  const conflictResult = await calendarConflictCheck({ startDateTime, endDateTime });
+  const conflictResult = await calendarConflictCheck({
+    startDateTime,
+    endDateTime,
+  });
   if (conflictResult?.error) return conflictResult;
 
   if (conflictResult?.conflict) {
@@ -204,5 +207,21 @@ async function getGoogleAccessToken() {
   const data = await res.json();
   if (!res.ok) throw new Error(`Token refresh failed: ${JSON.stringify(data)}`);
 
-  return data.access_token as string;
+  const accessToken = data.access_token as string;
+
+  // DEBUG: log token scopes to confirm we have write permissions
+  const scopes = await getTokenScopes(accessToken);
+  console.log("GCAL token scopes:", scopes);
+
+  return accessToken;
+}
+
+async function getTokenScopes(accessToken: string) {
+  const res = await fetch(
+    `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(
+      accessToken
+    )}`
+  );
+  const data = await res.json().catch(() => ({}));
+  return data.scope || null;
 }
