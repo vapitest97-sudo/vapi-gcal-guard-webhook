@@ -12,10 +12,14 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
   console.log("Incoming:", JSON.stringify(body)?.slice(0, 2000));
 
-  try {
-    const message: any = (body as any).message ?? body;
-    const toolCallList: any[] = message.toolCallList ?? [];
+  // IMPORTANT: Vapi envoie { message: { ... } }
+  const message: any = (body as any).message ?? body;
+  const toolCallList: any[] = message.toolCallList ?? message.toolCalls ?? [];
 
+  // On récupère le vrai numéro depuis le call (si présent)
+  const callCustomerNumber: string | undefined = message?.call?.customer?.number;
+
+  try {
     const results: any[] = [];
 
     for (const tc of toolCallList) {
@@ -25,6 +29,11 @@ export async function POST(req: Request) {
 
       const args =
         typeof argsRaw === "string" ? JSON.parse(argsRaw) : (argsRaw ?? {});
+
+      // Force le vrai numéro (si dispo) pour éviter "call.customer.number" ou un fake
+      if (callCustomerNumber) {
+        args.customerPhone = callCustomerNumber;
+      }
 
       if (
         name !== "calendar_conflict_check" &&
@@ -45,13 +54,22 @@ export async function POST(req: Request) {
       results.push({ toolCallId, result });
     }
 
+    console.log("Outgoing:", JSON.stringify({ results })?.slice(0, 2000));
     return Response.json({ results });
   } catch (err: any) {
+    // CRITIQUE: répondre quand même au format Vapi (results), sinon "No result returned"
     console.error("Webhook error:", err);
-    return Response.json(
-      { error: true, message: err?.message ?? String(err) },
-      { status: 500 }
-    );
+
+    const results = toolCallList.map((tc) => ({
+      toolCallId: tc.id,
+      result: {
+        error: true,
+        message: err?.message ?? String(err),
+      },
+    }));
+
+    console.log("Outgoing(error):", JSON.stringify({ results })?.slice(0, 2000));
+    return Response.json({ results });
   }
 }
 
@@ -142,11 +160,18 @@ async function calendarGuardedCreateEvent(args: any) {
   const accessToken = await getGoogleAccessToken();
   const calendarId = process.env.GCAL_CALENDAR_ID || "primary";
 
+  // Force une description propre, avec le téléphone sur une ligne explicite
+  const descriptionLines = [
+    notes,
+    address ? `Adresse: ${address}` : undefined,
+    customerName ? `Nom: ${customerName}` : undefined,
+    customerPhone ? `Téléphone: ${customerPhone}` : undefined,
+    customerEmail ? `Email: ${customerEmail}` : undefined,
+  ].filter(Boolean);
+
   const eventBody: any = {
     summary: title,
-    description: [notes, address, customerName, customerPhone, customerEmail]
-      .filter(Boolean)
-      .join("\n"),
+    description: descriptionLines.join("\n"),
     start: { dateTime: new Date(startDateTime).toISOString() },
     end: { dateTime: new Date(endDateTime).toISOString() },
   };
