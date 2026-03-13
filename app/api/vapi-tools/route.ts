@@ -1,5 +1,13 @@
 // app/api/vapi-tools/route.ts
 
+export async function GET() {
+  return Response.json({
+    ok: true,
+    version: "guarded-create-v1",
+    tools: ["calendar_conflict_check", "calendar_guarded_create_event"],
+  });
+}
+
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
   console.log("Incoming:", JSON.stringify(body)?.slice(0, 2000));
@@ -108,7 +116,10 @@ async function calendarGuardedCreateEvent(args: any) {
   } = args ?? {};
 
   if (!title || !startDateTime || !endDateTime) {
-    return { error: true, message: "Missing title, startDateTime or endDateTime" };
+    return {
+      error: true,
+      message: "Missing title, startDateTime or endDateTime",
+    };
   }
 
   // 1) Check conflicts (same calendar)
