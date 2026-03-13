@@ -12,11 +12,10 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
   console.log("Incoming:", JSON.stringify(body)?.slice(0, 2000));
 
-  // IMPORTANT: Vapi envoie { message: { ... } }
   const message: any = (body as any).message ?? body;
   const toolCallList: any[] = message.toolCallList ?? message.toolCalls ?? [];
 
-  // On récupère le vrai numéro depuis le call (si présent)
+  // Vrai numéro (si Vapi l’envoie dans le payload tool-calls)
   const callCustomerNumber: string | undefined = message?.call?.customer?.number;
 
   try {
@@ -30,7 +29,7 @@ export async function POST(req: Request) {
       const args =
         typeof argsRaw === "string" ? JSON.parse(argsRaw) : (argsRaw ?? {});
 
-      // Force le vrai numéro (si dispo) pour éviter "call.customer.number" ou un fake
+      // Force le vrai numéro du call (évite "call.customer.number" et les placeholders)
       if (callCustomerNumber) {
         args.customerPhone = callCustomerNumber;
       }
@@ -57,9 +56,9 @@ export async function POST(req: Request) {
     console.log("Outgoing:", JSON.stringify({ results })?.slice(0, 2000));
     return Response.json({ results });
   } catch (err: any) {
-    // CRITIQUE: répondre quand même au format Vapi (results), sinon "No result returned"
     console.error("Webhook error:", err);
 
+    // CRITIQUE: toujours répondre au format { results: [...] }
     const results = toolCallList.map((tc) => ({
       toolCallId: tc.id,
       result: {
@@ -160,9 +159,18 @@ async function calendarGuardedCreateEvent(args: any) {
   const accessToken = await getGoogleAccessToken();
   const calendarId = process.env.GCAL_CALENDAR_ID || "primary";
 
-  // Force une description propre, avec le téléphone sur une ligne explicite
+  // PATCH: nettoyer notes pour éviter d’avoir 2 numéros
+  // Si notes contient déjà "Téléphone: ...", on remplace par le bon
+  let cleanedNotes = (notes ?? "").toString();
+  if (customerPhone) {
+    cleanedNotes = cleanedNotes.replace(
+      /^Téléphone:\s.*$/gim,
+      `Téléphone: ${customerPhone}`
+    );
+  }
+
   const descriptionLines = [
-    notes,
+    cleanedNotes || undefined,
     address ? `Adresse: ${address}` : undefined,
     customerName ? `Nom: ${customerName}` : undefined,
     customerPhone ? `Téléphone: ${customerPhone}` : undefined,
