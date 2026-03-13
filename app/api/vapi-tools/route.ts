@@ -128,10 +128,10 @@ async function calendarGuardedCreateEvent(args: any) {
 
   if (conflictResult?.conflict) {
     return {
+      ...conflictResult,
       error: true,
       conflict: true,
       message: "Time slot already booked",
-      ...conflictResult,
     };
   }
 
